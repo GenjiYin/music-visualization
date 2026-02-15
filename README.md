@@ -1,4 +1,4 @@
-# 🎵 Sonic Flow - 音频可视化工具
+# 🎵 Music Flow - 音频可视化工具
 
 一个功能丰富的浏览器端音频可视化工具，支持多种可视化模式和屏幕录制功能。
 
@@ -154,4 +154,4 @@ npx serve
 
 ---
 
-**Enjoy the visual feast of music! 🎶✨**
+**Let the Music Flow! 🎶✨**
