@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Visualizer Pro (Studio Mode)</title>
+    <style>
+        :root {
+            --glass-bg: rgba(20, 20, 20, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent-color: #00f2ff;
+            --record-color: #ff3b3b;
+            --play-color: #00ff88;
+            --text-main: #ffffff;
+            --text-sub: #aaaaaa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #050505;
+            color: var(--text-main);
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* 背景微动层 */
+        #bg-layer {
+            position: absolute;
+            top: -10%;
+            left: -10%;
+            width: 120%;
+            height: 120%;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #000000 100%);
+            z-index: 0;
+            transition: transform 0.2s ease-out;
+            filter: blur(20px);
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            display: block;
+        }
+
+        /* 磨砂玻璃 UI 容器 */
+        .ui-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 900px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(15px) saturate(180%);
+            -webkit-backdrop-filter: blur(15px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: opacity 0.3s;
+        }
+
+        .controls-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .track-info {
+            font-size: 14px;
+            color: var(--text-sub);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #555;
+            box-shadow: 0 0 5px #555;
+        }
+        .status-dot.ready { background-color: #ffff00; box-shadow: 0 0 8px #ffff00; }
+        .status-dot.playing { background-color: #00ff88; box-shadow: 0 0 8px #00ff88; }
+
+        .actions-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        /* 按钮通用样式 */
+        button, .custom-file-upload {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+            outline: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-width: 40px;
+        }
+
+        button:hover, .custom-file-upload:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: white;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(1);
+        }
+
+        /* 播放按钮 */
+        #play-btn {
+            background: rgba(0, 255, 136, 0.15);
+            border-color: rgba(0, 255, 136, 0.4);
+            color: var(--play-color);
+            font-weight: bold;
+            width: 100px;
+        }
+        #play-btn:hover:not(:disabled) {
+            background: var(--play-color);
+            color: #000;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+        }
+
+        /* 录制按钮 */
+        #record-btn.recording {
+            background: rgba(255, 59, 59, 0.2);
+            border-color: var(--record-color);
+            color: var(--record-color);
+            box-shadow: 0 0 15px rgba(255, 59, 59, 0.4);
+        }
+        
+        #record-btn .rec-dot {
+            width: 10px;
+            height: 10px;
+            background-color: #fff;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        #record-btn.recording .rec-dot {
+            background-color: var(--record-color);
+            animation: blink 1s infinite;
+        }
+
+        /* 模式按钮激活态 */
+        button.active {
+            background: var(--accent-color);
+            color: black;
+            font-weight: bold;
+            border-color: var(--accent-color);
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        .mode-selector {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 5px;
+        }
+        .mode-selector::-webkit-scrollbar { height: 4px; }
+        .mode-selector::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+        #file-input { display: none; }
+
+        #overlay-start {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+        }
+
+        #overlay-start h1 {
+            font-size: 4rem;
+            background: linear-gradient(to right, #00f2ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+        }
+        #overlay-start p { font-size: 1.2rem; color: #ccc; animation: pulse 2s infinite; }
+
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+        @media (max-width: 600px) {
+            .mode-selector { justify-content: flex-start; }
+            .ui-container { bottom: 10px; padding: 15px; }
+            #overlay-start h1 { font-size: 2.5rem; }
+            .track-info span { display: none; } 
+            .actions-group { width: 100%; justify-content: space-between; }
+            #play-btn { width: auto; flex-grow: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="bg-layer"></div>
+    <canvas id="visualizer"></canvas>
+
+    <div id="overlay-start">
+        <h1>Sonic Flow</h1>
+        <p>点击屏幕初始化音频引擎</p>
+    </div>
+
+    <div class="ui-container">
+        <div class="controls-top">
+            <div class="track-info">
+                <div class="status-dot" id="status-dot"></div>
+                <span id="status-text">等待输入...</span>
+            </div>
+            <div class="actions-group">
+                <!-- 播放控制键 -->
+                <button id="play-btn" disabled>▶ 播放</button>
+
+                <!-- 其他控制键 -->
+                <label for="file-input" class="custom-file-upload">
+                    📁
+                </label>
+                <input type="file" id="file-input" accept="audio/*">
+                <button id="mic-btn">🎤</button>
+                <button id="record-btn">
+                    <span class="rec-dot"></span> <span id="rec-text">录制</span>
+                </button>
+            </div>
+        </div>
+        
+        <div class="mode-selector">
+            <button class="mode-btn active" data-mode="aurora">极光流线</button>
+            <button class="mode-btn" data-mode="nebula">粒子星云</button>
+            <button class="mode-btn" data-mode="kaleidoscope">万花筒</button>
+            <button class="mode-btn" data-mode="neon">复古霓虹</button>
+            <button class="mode-btn" data-mode="pulse">能量脉冲</button>
+        </div>
+    </div>
+
+<script>
+class AudioVisualizer {
+    constructor() {
+        this.canvas = document.getElementById('visualizer');
+        this.ctx = this.canvas.getContext('2d', { alpha: false });
+        
+        // 音频上下文
+        this.audioCtx = null;
+        this.analyser = null;
+        this.source = null;
+        this.destNode = null; // 录制用的节点
+        this.audioBuffer = null; // 存储解码后的音频数据
+        
+        // 数据数组
+        this.dataArray = null;
+        
+        // 状态标记
+        this.mode = 'aurora';
+        this.isPlaying = false; // 音频是否正在播放
+        this.isAudioLoaded = false; // 文件是否已加载
+        this.isRecording = false; // 是否正在录制
+        this.inputType = 'file'; // 'file' or 'mic'
+
+        // 录制相关
+        this.mediaRecorder = null;
+        this.recordedChunks = [];
+
+        // 动画参数
+        this.particles = [];
+        this.maxParticles = 150;
+        this.beatThreshold = 200;
+        this.beatDecay = 0.95;
+        this.currentBeat = 0;
+        this.angle = 0;
+
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        this.initParticles();
+        
+        // 启动渲染循环（即使没有音乐，背景动画也要跑，为了录制）
+        this.render();
+    }
+
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.centerX = this.canvas.width / 2;
+        this.centerY = this.canvas.height / 2;
+    }
+
+    async initAudioContext() {
+        if (!this.audioCtx) {
+            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            this.analyser = this.audioCtx.createAnalyser();
+            this.analyser.fftSize = 2048;
+            this.analyser.smoothingTimeConstant = 0.85;
+            const bufferLength = this.analyser.frequencyBinCount;
+            this.dataArray = new Uint8Array(bufferLength);
+            this.destNode = this.audioCtx.createMediaStreamDestination();
+        }
+        if (this.audioCtx.state === 'suspended') {
+            await this.audioCtx.resume();
+        }
+    }
+
+    // 1. 处理文件选择 (只加载，不播放)
+    handleFileSelect(file) {
+        // 重置状态
+        this.stopAudio();
+        this.inputType = 'file';
+        this.updateStatus('loading', `正在加载: ${file.name}...`);
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.initAudioContext().then(() => {
+                this.audioCtx.decodeAudioData(e.target.result, (buffer) => {
+                    this.audioBuffer = buffer;
+                    this.isAudioLoaded = true;
+                    this.updateStatus('ready', `就绪: ${file.name}`);
+                    
+                    // 启用播放按钮
+                    const playBtn = document.getElementById('play-btn');
+                    playBtn.disabled = false;
+                    playBtn.innerHTML = "▶ 播放";
+                }, (err) => {
+                    console.error("解码失败", err);
+                    this.updateStatus('error', "音频解码失败");
+                });
+            });
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // 2. 处理麦克风 (实时，无法暂停，直接开始)
+    async handleMicInput() {
+        try {
+            await this.initAudioContext();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            this.stopAudio(); // 停止之前的文件播放
+            this.inputType = 'mic';
+            
+            this.source = this.audioCtx.createMediaStreamSource(stream);
+            this.source.connect(this.analyser);
+            this.source.connect(this.destNode); // 连到录制
+            
+            this.isPlaying = true;
+            this.updateStatus('playing', "输入源: 麦克风");
+            
+            // 麦克风模式下禁用播放按钮 (因为是实时的)
+            const playBtn = document.getElementById('play-btn');
+            playBtn.disabled = true;
+            playBtn.innerHTML = "实时";
+
+        } catch (err) {
+            console.error(err);
+            alert("无法访问麦克风");
+        }
+    }
+
+    // 3. 播放/停止控制逻辑
+    togglePlay() {
+        if (this.inputType === 'mic') return;
+
+        if (this.isPlaying) {
+            this.stopAudio();
+        } else {
+            this.playAudio();
+        }
+    }
+
+    playAudio() {
+        if (!this.audioBuffer) return;
+
+        // 如果之前的源还在，先断开
+        if (this.source) {
+            this.source.disconnect();
+        }
+
+        this.source = this.audioCtx.createBufferSource();
+        this.source.buffer = this.audioBuffer;
+        
+        // 连线：源 -> 分析器 -> 扬声器 & 录制节点
+        this.source.connect(this.analyser);
+        this.analyser.connect(this.audioCtx.destination);
+        this.analyser.connect(this.destNode);
+
+        this.source.onended = () => {
+            // 播放结束自动停止
+            this.stopAudio(false); 
+        };
+
+        this.source.start(0);
+        this.isPlaying = true;
+        
+        // UI 更新
+        const playBtn = document.getElementById('play-btn');
+        playBtn.innerHTML = "⏹ 停止";
+        playBtn.classList.add('active');
+        this.updateStatus('playing', "正在播放");
+    }
+
+    stopAudio(manual = true) {
+        if (this.source && this.isPlaying) {
+            try {
+                this.source.stop();
+            } catch(e) { /* ignore if already stopped */ }
+        }
+        this.isPlaying = false;
+        
+        // UI 更新
+        const playBtn = document.getElementById('play-btn');
+        if (this.inputType === 'file') {
+            playBtn.innerHTML = "▶ 播放";
+            playBtn.classList.remove('active');
+            // 如果是自然播放结束，不需要改状态文字为就绪，除非手动停止
+            if (manual) this.updateStatus('ready', "已停止 (就绪)");
+        }
+    }
+
+    // --- 录制功能 (逻辑不变) ---
+    toggleRecording() {
+        if (this.isRecording) {
+            this.stopRecording();
+        } else {
+            this.startRecording();
+        }
+    }
+
+    startRecording() {
+        // 注意：即使没有音乐播放，我们也要能录制画面
+        // 确保 AudioContext 已初始化，否则 destNode 报错
+        if(!this.audioCtx) this.initAudioContext();
+
+        const canvasStream = this.canvas.captureStream(60);
+        const audioStream = this.destNode.stream;
+        const combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...audioStream.getAudioTracks()
+        ]);
+
+        try {
+            const options = MediaRecorder.isTypeSupported('video/webm; codecs=vp9') 
+                ? { mimeType: 'video/webm; codecs=vp9' } 
+                : { mimeType: 'video/webm' };
+            
+            this.mediaRecorder = new MediaRecorder(combinedStream, options);
+            this.recordedChunks = [];
+            this.mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) this.recordedChunks.push(e.data);
+            };
+            this.mediaRecorder.onstop = () => this.saveRecording();
+            this.mediaRecorder.start();
+            this.isRecording = true;
+            
+            const btn = document.getElementById('record-btn');
+            btn.classList.add('recording');
+            document.getElementById('rec-text').innerText = "停止";
+
+        } catch (e) {
+            alert("录制启动失败，请使用 Chrome/Edge 浏览器");
+        }
+    }
+
+    stopRecording() {
+        if (this.mediaRecorder && this.isRecording) {
+            this.mediaRecorder.stop();
+            this.isRecording = false;
+            const btn = document.getElementById('record-btn');
+            btn.classList.remove('recording');
+            document.getElementById('rec-text').innerText = "录制";
+        }
+    }
+
+    saveRecording() {
+        const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `viz_${timestamp}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+    }
+
+    // --- 辅助方法 ---
+    updateStatus(state, text) {
+        const dot = document.getElementById('status-dot');
+        const txt = document.getElementById('status-text');
+        
+        dot.className = 'status-dot'; // reset
+        if(state === 'ready') dot.classList.add('ready');
+        if(state === 'playing') dot.classList.add('playing');
+        
+        txt.innerText = text;
+    }
+
+    initParticles() {
+        for(let i=0; i<this.maxParticles; i++) {
+            this.particles.push({
+                x: Math.random() * this.canvas.width,
+                y: Math.random() * this.canvas.height,
+                radius: Math.random() * 3 + 1,
+                color: `hsl(${Math.random()*360}, 70%, 50%)`,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                angle: Math.random() * Math.PI * 2
+            });
+        }
+    }
+
+    // --- 渲染循环 (始终运行) ---
+    render() {
+        requestAnimationFrame(() => this.render());
+
+        // 获取音频数据 (如果不播放，就是全0)
+        let average = 0;
+        let bassAvg = 0;
+
+        if (this.isPlaying && this.analyser) {
+            this.analyser.getByteFrequencyData(this.dataArray);
+            let sum = 0;
+            let bassSum = 0;
+            for(let i = 0; i < this.dataArray.length; i++) {
+                sum += this.dataArray[i];
+                if(i < 100) bassSum += this.dataArray[i];
+            }
+            average = sum / this.dataArray.length;
+            bassAvg = bassSum / 100;
+        } else {
+            // 空闲动画：模拟一点点波动，让画面活着
+            average = 5; 
+            bassAvg = 5 + Math.sin(Date.now()/500)*5;
+            // 如果处于暂停状态，我们需要一个空的 dataArray 防止报错
+            if(!this.dataArray && this.analyser) {
+               this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+            } else if (!this.dataArray) {
+               this.dataArray = new Uint8Array(1024); // fallback
+            }
+        }
+
+        // 绘制背景 (含拖尾)
+        this.ctx.fillStyle = 'rgba(5, 5, 5, 0.2)';
+        if (this.mode === 'neon') this.ctx.fillStyle = 'rgba(20, 10, 30, 0.3)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // 绘制模式
+        switch (this.mode) {
+            case 'aurora': this.drawAurora(average); break;
+            case 'nebula': this.drawNebula(bassAvg); break;
+            case 'kaleidoscope': this.drawKaleidoscope(average, bassAvg); break;
+            case 'neon': this.drawNeon(this.dataArray); break;
+            case 'pulse': this.drawPulse(bassAvg); break;
+        }
+
+        // 背景微动
+        const bgLayer = document.getElementById('bg-layer');
+        const scale = 1 + (bassAvg / 255) * 0.1;
+        bgLayer.style.transform = `scale(${scale})`;
+    }
+
+    // --- 绘图函数保持一致 ---
+    drawAurora(average) {
+        this.ctx.lineWidth = 2;
+        this.ctx.globalCompositeOperation = 'screen'; 
+        for (let i = 0; i < 5; i++) {
+            this.ctx.beginPath();
+            let hue = (Date.now() / 20 + i * 50) % 360;
+            this.ctx.strokeStyle = `hsla(${hue}, 80%, 60%, 0.5)`;
+            for (let x = 0; x < this.canvas.width; x += 20) {
+                const freqIndex = Math.floor((x / this.canvas.width) * 100);
+                const freqVal = this.dataArray[freqIndex] || 0;
+                // 空闲时给予轻微波动
+                const idleWave = Math.sin(x*0.01 + Date.now()*0.002)*10;
+                const y = this.centerY + Math.sin(x * 0.005 + Date.now() * 0.001 + i) * 100 + (freqVal * 0.5) * (i % 2 === 0 ? 1 : -1) + (average < 10 ? idleWave : 0); 
+                if (x === 0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            }
+            this.ctx.stroke();
+        }
+        this.ctx.globalCompositeOperation = 'source-over';
+    }
+
+    drawNebula(bass) {
+        this.ctx.translate(this.centerX, this.centerY);
+        this.angle += 0.002; // 始终旋转
+        this.ctx.rotate(this.angle);
+        const speedMultiplier = 1 + (bass / 255) * 2;
+        this.particles.forEach((p, index) => {
+            p.angle += 0.01 * speedMultiplier;
+            this.ctx.beginPath();
+            const x = Math.cos(p.angle * index) * (index * 2 + bass); 
+            const y = Math.sin(p.angle * index) * (index * 2 + bass);
+            this.ctx.arc(x, y, p.radius * Math.max(0.5, bass/50), 0, Math.PI * 2);
+            this.ctx.fillStyle = p.color;
+            this.ctx.shadowBlur = 10;
+            this.ctx.shadowColor = p.color;
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        });
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0); 
+    }
+
+    drawKaleidoscope(average, bass) {
+        const slices = 8;
+        const sliceAngle = (Math.PI * 2) / slices;
+        this.angle += 0.005;
+        this.ctx.translate(this.centerX, this.centerY);
+        this.ctx.rotate(this.angle);
+        for (let i = 0; i < slices; i++) {
+            this.ctx.save();
+            this.ctx.rotate(i * sliceAngle);
+            this.ctx.beginPath();
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeStyle = `hsl(${(average + i * 30) % 360}, 80%, 60%)`;
+            for (let j = 0; j < 50; j++) {
+                const val = this.dataArray[j] * 0.8;
+                const x = j * 4;
+                const y = -val - 50;
+                if(j===0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            }
+            this.ctx.stroke();
+            this.ctx.scale(1, -1);
+            this.ctx.beginPath();
+            for (let j = 0; j < 50; j++) {
+                const val = this.dataArray[j] * 0.8;
+                const x = j * 4;
+                const y = -val - 50;
+                if(j===0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            }
+            this.ctx.stroke();
+            this.ctx.restore();
+        }
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    drawNeon(data) {
+        this.ctx.strokeStyle = 'rgba(255, 0, 255, 0.4)';
+        this.ctx.lineWidth = 1;
+        const offset = (Date.now() / 2) % 100; 
+        this.ctx.beginPath();
+        for(let i=-1000; i<1000; i+=100) {
+            this.ctx.moveTo(this.centerX, this.centerY);
+            this.ctx.lineTo(this.centerX + i * 2, this.canvas.height);
+        }
+        this.ctx.stroke();
+        for(let y=0; y<this.canvas.height/2; y+=40) {
+            const yPos = this.centerY + y + (offset * (y/300));
+            if(yPos > this.canvas.height) continue;
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, yPos);
+            this.ctx.lineTo(this.canvas.width, yPos);
+            this.ctx.stroke();
+        }
+        const bass = data[10] || 0;
+        this.ctx.beginPath();
+        this.ctx.arc(this.centerX, this.centerY - 100, 80 + (bass/5), 0, Math.PI * 2);
+        const gradient = this.ctx.createLinearGradient(0, this.centerY-200, 0, this.centerY);
+        gradient.addColorStop(0, "#ffcc00");
+        gradient.addColorStop(1, "#ff0055");
+        this.ctx.fillStyle = gradient;
+        this.ctx.fill();
+        const barWidth = (this.canvas.width / 100);
+        for(let i=0; i<100; i++) {
+            const barHeight = data[i] || 0;
+            this.ctx.fillStyle = `hsl(${i * 3 + 180}, 100%, 50%)`;
+            this.ctx.fillRect(i * barWidth, this.canvas.height - barHeight, barWidth - 2, barHeight);
+            this.ctx.fillStyle = `rgba(0, 255, 255, 0.2)`;
+            this.ctx.fillRect(i * barWidth, this.canvas.height, barWidth - 2, barHeight * 0.5);
+        }
+    }
+
+    drawPulse(bass) {
+        if (bass > this.beatThreshold) this.currentBeat = 1.0;
+        else this.currentBeat *= this.beatDecay;
+        const radius = 100 + (bass * 0.8) + (this.currentBeat * 50);
+        this.ctx.translate(this.centerX, this.centerY);
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        this.ctx.strokeStyle = `hsl(${bass + 180}, 100%, 60%)`;
+        this.ctx.lineWidth = 5;
+        this.ctx.shadowBlur = 30;
+        this.ctx.shadowColor = `hsl(${bass + 180}, 100%, 60%)`;
+        this.ctx.stroke();
+        this.ctx.shadowBlur = 0;
+        for(let i=1; i<5; i++) {
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, radius + i * 40 * (bass/100), 0, Math.PI * 2);
+            this.ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 - i*0.1})`;
+            this.ctx.lineWidth = 2;
+            this.ctx.stroke();
+        }
+        const count = 30;
+        for(let i=0; i<count; i++) {
+            this.ctx.rotate((Math.PI * 2) / count);
+            const dist = radius + 20 + this.dataArray[i * 2] * 0.5;
+            this.ctx.fillStyle = '#fff';
+            this.ctx.fillRect(dist, -2, this.dataArray[i] / 2, 4);
+        }
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+}
+
+// --- 初始化与事件绑定 ---
+document.addEventListener('DOMContentLoaded', () => {
+    const viz = new AudioVisualizer();
+    const overlay = document.getElementById('overlay-start');
+    const fileInput = document.getElementById('file-input');
+    const micBtn = document.getElementById('mic-btn');
+    const recordBtn = document.getElementById('record-btn');
+    const playBtn = document.getElementById('play-btn');
+    const modeBtns = document.querySelectorAll('.mode-btn');
+
+    // 1. 初始化引擎
+    overlay.addEventListener('click', () => {
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.style.display = 'none', 500);
+        viz.initAudioContext();
+    });
+
+    // 2. 文件选择 (加载但不播放)
+    fileInput.addEventListener('change', (e) => {
+        if(e.target.files.length > 0) {
+            viz.handleFileSelect(e.target.files[0]);
+        }
+    });
+
+    // 3. 麦克风
+    micBtn.addEventListener('click', () => {
+        viz.handleMicInput();
+        micBtn.classList.add('active');
+        document.querySelector('label[for="file-input"]').style.background = 'rgba(255,255,255,0.1)';
+    });
+
+    // 4. 播放/停止 键
+    playBtn.addEventListener('click', () => {
+        viz.togglePlay();
+    });
+
+    // 5. 录制键
+    recordBtn.addEventListener('click', () => {
+        viz.toggleRecording();
+    });
+
+    // 6. 模式切换
+    modeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            modeBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            viz.mode = btn.dataset.mode;
+            viz.ctx.fillStyle = '#000';
+            viz.ctx.fillRect(0, 0, viz.canvas.width, viz.canvas.height);
+        });
+    });
+});
+</script>
+</body>
+</html>
